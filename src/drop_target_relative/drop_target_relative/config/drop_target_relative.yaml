@@ -1,0 +1,82 @@
+# ===============================
+# drop_target_relative parameters
+# ===============================
+
+# Topics
+topics:
+  # YOLO must publish drop_target_relative/DetectionArray on this topic.
+  detection: /yolo/detections
+
+  # Odometry source. The node uses position.z as current height and orientation.z/w to get yaw.
+  odom: /mavros/local_position/odom
+
+  # Output topic. Message type: geometry_msgs/Vector3Stamped.
+  # vector.x/vector.y are the target offset relative to the dropper outlet, in meters.
+  relative: /drop_target_relative
+
+# Target selection
+target:
+  class_name: "A"
+  min_confidence: 0.50
+
+# Downward camera intrinsics, from calibration.
+camera:
+  fx: 644.0923
+  fy: 649.26
+  cx: 314.5237
+  cy: 277.9386
+
+# Height of target plane in odom/local-position z coordinate.
+# If takeoff ground is z=0 and the marker lies on the ground, keep 0.0.
+target_plane_z: 0.0
+
+# Ignore calculations when current_z - target_plane_z is too small.
+min_valid_z: 0.05
+
+# Limit each single-frame estimated body x/y offset, meters.
+# This prevents one bad bbox from producing a huge offset.
+max_one_shot: 2.0
+
+# Pixel-to-body coordinate mapping.
+# du_m = (bbox_center_x - camera.cx) / camera.fx * Z, positive means image right.
+# dv_m = (bbox_center_y - camera.cy) / camera.fy * Z, positive means image down.
+# body_x = bx_from_u * du_m + bx_from_v * dv_m
+# body_y = by_from_u * du_m + by_from_v * dv_m
+# The default follows the earlier project convention:
+#   image down  -> body x negative
+#   image right -> body y negative
+pixel_to_body:
+  bx_from_u: 0.0
+  bx_from_v: -1.0
+  by_from_u: -1.0
+  by_from_v: 0.0
+
+# Dropper outlet relative to downward camera optical center, expressed in UAV body frame, meters.
+# body x: normally forward; body y: normally left. Confirm with your own odom/control convention.
+# Example: dropper is 0.12 m behind camera and 0.03 m right of camera:
+#   offset_x_body: -0.12
+#   offset_y_body: -0.03
+dropper:
+  offset_x_body: 0.03
+  offset_y_body: -0.09
+
+# Moving-average smoothing over the latest N valid detections.
+smoothing:
+  sample_num: 5
+
+# Stop publishing if detections/odom become stale.
+timeout:
+  detection: 0.5
+  odom: 0.5
+
+publish_rate: 20.0
+
+# output.frame:
+#   body: vector is in UAV body frame. Positive x means target is in front of dropper.
+#   odom: vector is rotated by yaw into odom/local-position frame.
+output:
+  frame: odom
+
+frames:
+  body: base_link
+  odom: odom

@@ -1,0 +1,8 @@
+<launch>
+    <node pkg="complete_mission_kk"
+          type="ab_detect_node.py"
+          name="ab_detect_node"
+          output="screen">
+        <rosparam file="$(find complete_mission_kk)/config/ab_detect.yaml" command="load"/>
+    </node>
+</launch>

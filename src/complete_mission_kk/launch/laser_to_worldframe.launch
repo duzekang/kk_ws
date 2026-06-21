@@ -1,0 +1,15 @@
+<launch>
+
+  <!-- 发布 world 和 camera_init 的静态变换（两者重合） -->
+  <!-- 格式: x y z yaw pitch roll frame_id child_frame_id period(ms) -->
+  <node pkg="tf" type="static_transform_publisher" 
+        name="world_to_camera_init" 
+        args="0 0 0 0 0 0 world camera_init 100" 
+        output="screen" />
+
+  <!-- 启动你的激光转 world 坐标系的节点 -->
+  <node pkg="complete_mission_kk" type="laser_to_worldframe" 
+        name="laser_to_worldframe" 
+        output="screen" />
+
+</launch>

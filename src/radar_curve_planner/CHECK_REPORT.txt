@@ -1,0 +1,28 @@
+Static package check report
+===========================
+
+Package: radar_curve_planner
+Variant: smooth_height_slice_2d
+
+Checked items:
+- package.xml XML parse: OK
+- launch/radar_curve_planner.launch XML parse: OK
+- launch/view_yaml_traj.launch XML parse: OK
+- config/mission_params.yaml YAML parse: OK, no None/null values
+- config/planner_params.yaml YAML parse: OK, no None/null values
+- scripts/view_yaml_traj.py Python syntax: OK
+- Zip integrity: OK after packaging
+- Source scan: no system()/popen()/fork()/execv() calls introduced
+
+ROS/catkin build note:
+This environment does not contain ROS Noetic, so final catkin_make must be run on the target machine:
+
+  cd /home/abot/kk_ws
+  catkin_make --pkg radar_curve_planner
+
+Main behavior:
+- A* path search on 2D inflated occupancy grid
+- height-slice projection: z = 0.8 +/- 0.15m by default
+- virtual wall: x >= -3.0, y >= -3.0
+- smoothing + corner rounding, with safety fallback
+- RViz live visualization and YAML trajectory visualization retained

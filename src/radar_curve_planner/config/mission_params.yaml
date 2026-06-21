@@ -1,0 +1,137 @@
+# Smooth EGO-lite + height-slice 2D projection + virtual-wall mission configuration.
+# 目标：A* 保证可行通道，安全圆角/平滑让轨迹更圆润；若平滑后不安全，自动回退到安全折线。
+# 关键修正：最终轨迹只输出 x,y，因此这里截取 z=0.5m 附近的一层点云，再压缩成 2D 障碍。
+# 这样不会因为地面/低矮噪声把地图堵死，也不会在飞行高度截面上直接穿过障碍。
+# 虚拟墙：x >= -3.0 且 y >= -3.0。
+
+radar_midpoint_node:
+  frame_id: "camera_init"
+  cloud_topic: "/cloud_registered"
+  pose_topic: "/mavros/local_position/pose"
+  midpoints_topic: "/radar_curve_planner/mid_points"
+  marker_topic: "/radar_curve_planner/midpoint_markers"
+
+  target3_x: -1.85
+  target3_y: -2.80
+  target3_z: 1.0
+  use_target_z: false
+  flight_height: 1.0
+
+  drone_diameter: 0.85
+  safety_margin: 0.10
+  obstacle_inflation_extra: 0.00
+
+  # ========================
+  # 高度截面 2D 投影避障
+  # ========================
+  # true：截取 z=0.5m 附近的一层点云，再压缩到 XY 平面。
+  # 默认截取 [0.65, 0.95]，即 0.5 ± 0.15m。
+  # 若障碍点云高度更稀疏，可把 half_width 加到 0.20 或 0.25。
+  project_pointcloud_to_2d: true
+  use_height_slice_projection: true
+  projection_slice_center_z: 0.50
+  projection_slice_half_width: 0.15
+  projection_min_z: 0.65
+  projection_max_z: 0.95
+
+  # 兼容旧模式：只有 project_pointcloud_to_2d=false 时才会使用下面三个参数。
+  use_2d_z_filter: true
+  obstacle_min_z: 0.60
+  obstacle_max_z: 2.00
+  self_filter_radius: 0.25
+
+  enable_virtual_wall: true
+  virtual_wall_min_x: -3.0
+  virtual_wall_min_y: -3.0
+  virtual_wall_max_x: 1000000000.0
+  virtual_wall_max_y: 1000000000.0
+  virtual_wall_margin: 0.00
+
+  grid_resolution: 0.10
+  grid_padding: 2.80
+  max_grid_cells: 250000
+  max_search_time: 0.35
+  allow_diagonal: true
+
+  clear_start_radius: 0.25
+  clear_goal_radius: 0.25
+
+  # A* 后处理：先视线剪枝，再安全圆角，再受约束迭代平滑。
+  enable_line_of_sight_prune: true
+  enable_corner_rounding: true
+  corner_rounding_radius: 0.35
+  corner_rounding_samples: 8
+
+  enable_path_smoothing: true
+  smoothing_iterations: 45
+  smoothing_alpha: 0.18
+  smoothing_check_step: 0.04
+
+  # 输出点间距。越小越圆润，点数越多。
+  output_spacing: 0.10
+  min_output_points: 6
+
+  # 如果平滑后不安全，回退到未平滑的 A* 折线路径。
+  fallback_to_raw_if_smoothing_invalid: true
+
+  publish_markers: true
+  allow_plan_without_cloud: true
+  publish_straight_when_no_cloud: true
+  print_pose: true
+  print_plan: true
+  status_period: 1.0
+  max_plan_rate: 5.0
+
+curve_yaml_writer_node:
+  frame_id: "camera_init"
+  cloud_topic: "/cloud_registered"
+  midpoints_topic: "/radar_curve_planner/mid_points"
+  fitted_path_topic: "/radar_curve_planner/fitted_path"
+  marker_topic: "/radar_curve_planner/curve_markers"
+  path_valid_topic: "/radar_curve_planner/path_valid"
+
+  output_yaml: "/home/abot/kk_ws/src/radar_curve_planner/tmp/radar_generated_traj.yaml"
+  traj_name: "traj1_4"
+  output_coordinate_mode: "absolute"
+
+  flight_height: 1.0
+  drone_diameter: 0.85
+  safety_margin: 0.04
+
+  # 必须和 radar_midpoint_node 一致：最终 YAML 校验也按高度截面 2D 投影做。
+  project_pointcloud_to_2d: true
+  use_height_slice_projection: true
+  projection_slice_center_z: 0.80
+  projection_slice_half_width: 0.15
+  projection_min_z: 0.65
+  projection_max_z: 0.95
+
+  # 兼容旧模式：只有 project_pointcloud_to_2d=false 时才会使用下面三个参数。
+  use_2d_z_filter: true
+  obstacle_min_z: 0.60
+  obstacle_max_z: 2.00
+  self_filter_radius: 0.90
+  start_ignore_curve_distance: 0.80
+
+  enable_virtual_wall: true
+  virtual_wall_min_x: -3.0
+  virtual_wall_min_y: -3.0
+  virtual_wall_max_x: 1000000000.0
+  virtual_wall_max_y: 1000000000.0
+  virtual_wall_margin: 0.00
+
+  min_collision_points: 24
+
+  # 这版输入已经是安全平滑轨迹，writer 默认只做 resample 和校验，不再二次 Catmull-Rom 外凸。
+  curve_mode: "resample"
+  resample_step: 0.08
+
+  max_curvature: 999.0
+  max_turn_angle_deg: 179.0
+  min_segment_len: 0.02
+  sample_step: 0.06
+
+  write_even_if_invalid: false
+  one_shot: false
+  one_shot_require_valid: true
+  print_collision_cloud_count: true

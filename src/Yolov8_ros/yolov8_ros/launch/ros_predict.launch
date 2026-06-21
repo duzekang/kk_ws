@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<launch>
+  <!-- 单摄 YOLO 节点。原参数保留；front 模式需要 active_camera:=forward。 -->
+
+  <arg name="weight_path"   default="$(find yolov8_ros)/weights/abdown.pt"/>
+  <arg name="image_topic"   default="/usb_cam/image_raw"/>
+  <arg name="pub_topic"     default="/object_position"/>
+  <arg name="pub_topic_down" default="/yolo/detections_down"/>
+  <arg name="pub_topic_forward" default="/yolo/detections_forward"/>
+  <arg name="conf"          default="0.5"/>
+  <arg name="use_cpu"       default="false"/>
+  <arg name="visualize"     default="false"/>
+  <arg name="enhanced"      default="false"/>
+  <arg name="image_pub_topic" default="/yolov8/detection_image"/>
+  <arg name="active_camera" default="down"/>
+  <arg name="frame_skip" default="1"/>
+  <arg name="image_pub_fps" default="0"/>
+  <arg name="publish_image" default="true"/>
+
+  <node pkg="yolov8_ros" type="ros_predict.py" name="yolo_detector" output="screen">
+    <param name="single_camera"     value="true"/>
+    <param name="weight_path"      value="$(arg weight_path)"/>
+    <param name="image_topic"      value="$(arg image_topic)"/>
+    <param name="active_camera"    value="$(arg active_camera)"/>
+    <param name="pub_topic"        value="$(arg pub_topic)"/>
+    <param name="pub_topic_down"   value="$(arg pub_topic_down)"/>
+    <param name="pub_topic_forward" value="$(arg pub_topic_forward)"/>
+    <param name="conf"             value="$(arg conf)"/>
+    <param name="use_cpu"          value="$(arg use_cpu)"/>
+    <param name="visualize"        value="$(arg visualize)"/>
+    <param name="enhanced"         value="$(arg enhanced)"/>
+    <param name="image_pub_topic"  value="$(arg image_pub_topic)"/>
+    <param name="frame_skip"       value="$(arg frame_skip)"/>
+    <param name="image_pub_fps"    value="$(arg image_pub_fps)"/>
+    <param name="publish_image"    value="$(arg publish_image)"/>
+  </node>
+</launch>

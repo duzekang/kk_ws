@@ -1,0 +1,5 @@
+<launch>
+  <node pkg="complete_mission_kk" type="lll" name="" output="screen">
+    <rosparam command="load" file="$(find complete_mission_kk)/cfg/lll.yaml" />
+  </node>
+</launch>

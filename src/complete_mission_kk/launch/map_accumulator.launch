@@ -1,0 +1,5 @@
+<launch>
+    <node name="" pkg="complete_mission_kk" type="map_accumulator" output="screen">
+        <rosparam file="$(find complete_mission_kk)/cfg/map_accumulator.yaml" command="load"/>
+    </node>
+</launch>

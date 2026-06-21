@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<launch>
+  <!-- 前置单摄展示：识别 A/B，发布前置识别和前置带框图。 -->
+
+  <arg name="video_device"  default="/dev/video0"/>
+  <arg name="image_width"   default="640"/>
+  <arg name="image_height"  default="480"/>
+  <arg name="pixel_format"  default="mjpeg"/>
+
+  <node name="usb_cam_front" pkg="usb_cam" type="usb_cam_node" output="screen">
+    <param name="video_device"    value="$(arg video_device)"/>
+    <param name="image_width"     value="$(arg image_width)"/>
+    <param name="image_height"    value="$(arg image_height)"/>
+    <param name="pixel_format"    value="$(arg pixel_format)"/>
+    <param name="camera_frame_id" value="camera_front"/>
+    <param name="io_method"       value="mmap"/>
+  </node>
+
+  <arg name="weight_path"     default="$(find yolov8_ros)/weights/abup.pt"/>
+  <arg name="image_topic"     default="/usb_cam_front/image_raw"/>
+  <arg name="pub_topic"       default="/object_position_front"/>
+  <arg name="conf"            default="0.5"/>
+  <arg name="use_cpu"         default="false"/>
+  <arg name="visualize"       default="false"/>
+  <arg name="enhanced"        default="true"/>
+  <arg name="frame_skip"      default="1"/>
+  <arg name="image_pub_fps"   default="0"/>
+
+  <node pkg="yolov8_ros" type="ros_predict.py" name="yolo_detector_front" output="screen">
+    <param name="single_camera"     value="true"/>
+    <param name="weight_path"      value="$(arg weight_path)"/>
+    <param name="active_camera"    value="forward"/>
+    <param name="image_topic"      value="$(arg image_topic)"/>
+    <param name="pub_topic"        value="$(arg pub_topic)"/>
+    <param name="pub_topic_forward" value="/yolo/detections_forward"/>
+    <param name="conf"             value="$(arg conf)"/>
+    <param name="use_cpu"          value="$(arg use_cpu)"/>
+    <param name="visualize"        value="$(arg visualize)"/>
+    <param name="enhanced"         value="$(arg enhanced)"/>
+    <param name="image_pub_topic"  value="/yolov8_front/detection_image"/>
+    <param name="frame_skip"       value="$(arg frame_skip)"/>
+    <param name="image_pub_fps"    value="$(arg image_pub_fps)"/>
+  </node>
+</launch>

@@ -1,0 +1,54 @@
+trajectory_visualizer_node:
+  frame_id: "camera_init"
+
+  # 包内自带轨迹 YAML。只读取里面每条 traj*/trajectory 的二维点信息。
+  yaml_file: ""
+
+  # 官方/主程序输入：std_msgs/Int32。
+  # 外界代码示例：
+  #   std_msgs::Int32 msg;
+  #   msg.data = route;  // 103/104/203/204
+  #   traj_pub.publish(msg);
+  # 映射：103->traj1_3, 104->traj1_4, 203->traj2_3, 204->traj2_4。
+  # 回归和前进路线一致，所以不处理 *_back。
+  route_topic: "/trajectory_visualizer/route"
+
+  # 兼容旧调试 topic。也接收 Int32，映射同上。
+  # 如果不需要，设成空字符串 ""。
+  select_id_topic: "/trajectory_visualizer/select_id"
+
+  # 可选 String 调试接口。默认关闭，避免比赛时误触发。
+  # 需要手动发字符串轨迹名时可改成 "/trajectory_visualizer/select"。
+  select_topic: ""
+
+  # 默认输出 topic。复用之前 RViz 常看的 yaml topic，
+  # 如果 RViz 已经添加过这两个 topic，收到信号后会自动刷新显示。
+  path_topic: "/radar_curve_planner/yaml_path"
+  marker_topic: "/radar_curve_planner/yaml_markers"
+
+  # 同时额外发布一份到比赛可读的独立 topic。
+  extra_path_topics:
+    - "/competition_trajectory/path"
+  extra_marker_topics:
+    - "/competition_trajectory/markers"
+
+  selected_type_topic: "/trajectory_visualizer/selected_type"
+
+  # 可视化高度。use_yaml_height=true 时优先使用 lll.yaml 中 height 字段。
+  use_yaml_height: true
+  z_height: 1.4
+
+  # 启动后是否自动显示一条默认轨迹。空字符串表示不自动发布，等待外界信号。
+  default_traj_name: ""
+
+  # latch=true 后，RViz 后订阅也能看到上一条轨迹。
+  latch: true
+
+  # 周期重发，避免 RViz 刷新/重连时看不到。0 表示不周期重发。
+  republish_rate: 1.0
+
+  # 线宽和点大小。
+  line_width: 0.06
+  point_size: 0.12
+  start_goal_size: 0.22
+  text_size: 0.22

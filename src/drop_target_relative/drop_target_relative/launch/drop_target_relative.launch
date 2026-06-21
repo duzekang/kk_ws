@@ -1,0 +1,8 @@
+<launch>
+  <node pkg="drop_target_relative"
+        type="drop_target_relative_node"
+        name="drop_target_relative_node"
+        output="screen">
+    <rosparam file="$(find drop_target_relative)/config/drop_target_relative.yaml" command="load" />
+  </node>
+</launch>

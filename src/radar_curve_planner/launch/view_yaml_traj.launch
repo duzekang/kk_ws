@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<launch>
+  <arg name="use_rviz" default="false" />
+  <arg name="rviz_config" default="$(find radar_curve_planner)/rviz/radar_curve_planner.rviz" />
+  <arg name="yaml_file" default="/home/abot/kk_ws/src/radar_curve_planner/tmp/radar_generated_traj.yaml" />
+  <arg name="traj_name" default="traj1_4" />
+  <arg name="frame_id" default="camera_init" />
+  <arg name="z" default="1.0" />
+
+  <node pkg="radar_curve_planner" type="view_yaml_traj.py" name="view_yaml_traj" output="screen">
+    <param name="yaml_file" value="$(arg yaml_file)" />
+    <param name="traj_name" value="$(arg traj_name)" />
+    <param name="frame_id" value="$(arg frame_id)" />
+    <param name="z" value="$(arg z)" />
+    <param name="enable_virtual_wall" value="true" />
+    <param name="virtual_wall_min_x" value="-3.0" />
+    <param name="virtual_wall_min_y" value="-3.0" />
+  </node>
+
+  <group if="$(arg use_rviz)">
+    <node pkg="rviz" type="rviz" name="radar_curve_planner_rviz" args="-d $(arg rviz_config)" output="screen" required="false" />
+  </group>
+</launch>

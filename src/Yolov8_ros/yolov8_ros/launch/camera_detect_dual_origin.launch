@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<launch>
+
+  <arg name="use_cpu"     default="false"/>
+  <arg name="visualize"   default="false"/>
+  <arg name="enhanced"    default="true"/>
+  <arg name="conf"        default="0.5"/>
+
+
+
+  <group ns="down">
+    <node name="usb_cam" pkg="usb_cam" type="usb_cam_node" output="screen">
+      <param name="video_device"    value="/dev/video0"/>
+      <param name="image_width"     value="640"/>
+      <param name="image_height"    value="480"/>
+      <param name="pixel_format"    value="yuyv"/>
+      <param name="camera_frame_id" value="camera_down"/>
+      <param name="io_method"       value="mmap"/>
+    </node>
+
+    <node pkg="yolov8_ros" type="ros_predict.py" name="yolo_detector" output="screen">
+      <param name="weight_path"      value="/home/abot/kk_ws/src/Yolov8_ros/yolov8_ros/weights/abdown.pt"/>
+      <param name="image_topic"      value="/down/usb_cam/image_raw"/>
+      <param name="pub_topic"        value="/yolo/detections"/>
+      <param name="conf"             value="$(arg conf)"/>
+      <param name="use_cpu"          value="$(arg use_cpu)"/>
+      <param name="visualize"        value="$(arg visualize)"/>
+      <param name="enhanced"         value="$(arg enhanced)"/>
+      <param name="image_pub_topic"  value="/yolov8_down/detection_image"/>
+    </node>
+  </group>
+
+</launch>

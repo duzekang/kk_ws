@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<launch>
+
+  <!-- 双摄完整功能：
+       输入：/down/usb_cam/image_raw、/forward/usb_cam_front/image_raw、/yolo/switch_camera
+       输出：/yolo/detections(active给主程序)、/yolo/detections_down、/yolo/detections_forward、/yolov8_detection/image_result(只前方带框图)
+  -->
+
+  <arg name="use_cpu"     default="false"/>
+  <arg name="visualize"   default="false"/>
+  <arg name="enhanced"    default="true"/>
+  <arg name="conf"        default="0.5"/>
+  <arg name="active_camera" default="down"/>
+  <arg name="recognize_mode" default="both"/> <!-- both=前/下都识别；active=只识别切换到的摄像头 -->
+  <arg name="frame_skip"  default="1"/>
+  <arg name="frame_skip_down" default="$(arg frame_skip)"/>
+  <arg name="frame_skip_forward" default="$(arg frame_skip)"/>
+  <arg name="image_pub_fps" default="0"/> <!-- 0=不限速；评委看图卡可设 10 -->
+  <arg name="publish_image" default="true"/>
+
+  <arg name="down_video_device" default="/dev/video0"/>
+  <arg name="forward_video_device" default="/dev/video2"/>
+  <arg name="down_pixel_format" default="yuyv"/>
+  <arg name="forward_pixel_format" default="mjpeg"/>
+  <arg name="image_width" default="640"/>
+  <arg name="image_height" default="480"/>
+
+  <group ns="down">
+    <node name="usb_cam" pkg="usb_cam" type="usb_cam_node" output="screen">
+      <param name="video_device"    value="$(arg down_video_device)"/>
+      <param name="image_width"     value="$(arg image_width)"/>
+      <param name="image_height"    value="$(arg image_height)"/>
+      <param name="pixel_format"    value="$(arg down_pixel_format)"/>
+      <param name="camera_frame_id" value="camera_down"/>
+      <param name="io_method"       value="mmap"/>
+    </node>
+  </group>
+
+  <group ns="forward">
+    <node name="usb_cam_front" pkg="usb_cam" type="usb_cam_node" output="screen">
+      <param name="video_device"    value="$(arg forward_video_device)"/>
+      <param name="image_width"     value="$(arg image_width)"/>
+      <param name="image_height"    value="$(arg image_height)"/>
+      <param name="pixel_format"    value="$(arg forward_pixel_format)"/>
+      <param name="camera_frame_id" value="camera_front"/>
+      <param name="io_method"       value="mmap"/>
+    </node>
+  </group>
+
+  <node pkg="yolov8_ros" type="ros_predict.py" name="yolo_detector" output="screen">
+    <param name="weight_path"            value="/home/abot/kk_ws/src/Yolov8_ros/yolov8_ros/weights/mix.pt"/>
+    <param name="image_topic_down"       value="/down/usb_cam/image_raw"/>
+    <param name="image_topic_forward"    value="/forward/usb_cam_front/image_raw"/>
+    <param name="active_camera"          value="$(arg active_camera)"/>
+    <param name="recognize_mode"         value="$(arg recognize_mode)"/>
+
+    <param name="pub_topic"              value="/yolo/detections"/>
+    <param name="pub_topic_down"         value="/yolo/detections_down"/>
+    <param name="pub_topic_forward"      value="/yolo/detections_forward"/>
+    <param name="image_pub_topic"        value="/yolov8_detection/image_result"/>
+    <param name="publish_front_image_only" value="true"/>
+
+    <param name="conf"                   value="$(arg conf)"/>
+    <param name="use_cpu"                value="$(arg use_cpu)"/>
+    <param name="visualize"              value="$(arg visualize)"/>
+    <param name="enhanced"               value="$(arg enhanced)"/>
+    <param name="frame_skip_down"        value="$(arg frame_skip_down)"/>
+    <param name="frame_skip_forward"     value="$(arg frame_skip_forward)"/>
+    <param name="image_pub_fps"          value="$(arg image_pub_fps)"/>
+    <param name="publish_image"          value="$(arg publish_image)"/>
+  </node>
+
+</launch>

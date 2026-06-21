@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- 默认不启动 RViz，因为比赛程序前面已经打开了 RViz。 -->
+  <arg name="use_rviz" default="false" />
+  <arg name="config" default="$(find trajectory_visualizer)/config/visualizer_params.yaml" />
+  <arg name="yaml_file" default="$(find trajectory_visualizer)/config/lll.yaml" />
+  <arg name="rviz_config" default="$(find trajectory_visualizer)/rviz/trajectory_visualizer.rviz" />
+
+  <rosparam command="load" file="$(arg config)" />
+  <param name="/trajectory_visualizer_node/yaml_file" value="$(arg yaml_file)" />
+
+  <node pkg="trajectory_visualizer"
+        type="trajectory_visualizer_node.py"
+        name="trajectory_visualizer_node"
+        output="screen" />
+
+  <group if="$(arg use_rviz)">
+    <node pkg="rviz"
+          type="rviz"
+          name="trajectory_visualizer_rviz"
+          args="-d $(arg rviz_config)"
+          output="screen" />
+  </group>
+</launch>

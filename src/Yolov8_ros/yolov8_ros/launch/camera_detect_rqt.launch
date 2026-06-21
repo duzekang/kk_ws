@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<launch>
+  <!-- 启动双摄完整功能，并自动打开 rqt_image_view 查看前置带框图。 -->
+
+  <arg name="annotated_image_topic" default="/yolov8_detection/image_result"/>
+  <arg name="image_pub_fps" default="10"/>
+  <arg name="frame_skip" default="1"/>
+
+  <include file="$(find yolov8_ros)/launch/camera_detect_dual.launch">
+    <arg name="image_pub_fps" value="$(arg image_pub_fps)"/>
+    <arg name="frame_skip" value="$(arg frame_skip)"/>
+  </include>
+
+  <node name="rqt_image_view"
+        pkg="rqt_image_view"
+        type="rqt_image_view"
+        args="$(arg annotated_image_topic)"
+        output="screen"/>
+</launch>

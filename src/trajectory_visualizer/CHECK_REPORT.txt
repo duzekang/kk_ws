@@ -1,0 +1,10 @@
+YAML OK: config/lll.yaml
+No None/null: config/lll.yaml
+YAML OK: config/visualizer_params.yaml
+No None/null: config/visualizer_params.yaml
+XML OK: package.xml
+XML OK: launch/trajectory_visualizer.launch
+XML OK: launch/demo_signal.launch
+Python syntax OK: scripts/trajectory_visualizer_node.py
+Python syntax OK: scripts/send_traj_signal.py
+No os.system/subprocess/eval/exec usage found in scripts

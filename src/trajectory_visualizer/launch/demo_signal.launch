@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- 发布一次 std_msgs/Int32 route code。可选：103,104,203,204。 -->
+  <arg name="route" default="104" />
+  <node pkg="trajectory_visualizer"
+        type="send_traj_signal.py"
+        name="send_traj_signal_once"
+        output="screen"
+        args="$(arg route)" />
+</launch>

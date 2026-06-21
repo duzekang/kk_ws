@@ -1,0 +1,98 @@
+
+---
+
+# 激光与舵机控制模块——软件对接与调试说明
+
+本项目基于 `rosserial_arduino` 框架，将底层硬件控制（舵机与激光）封装为标准 ROS 节点。软件开发人员无需关注硬件底层烧录，只需通过对应的 Launch 文件启动节点，并利用标准话题（Topic）进行联调。
+
+具体的目录结构可参考工作空间内的 `src/laser_servo_control`（包含 `launch` 与 `arduino` 源码目录）。
+
+---
+
+## 1. 节点内部调度机制
+
+底层嵌入式微控制器作为整个无人机 ROS 系统的分布式节点，其内部调度逻辑如下：
+
+* **注册调度**：节点启动时，通过串口向宿主机注册订阅以下两个话题：
+* `/dropper_open` (`std_msgs/Bool`) —— 投放舵机控制
+* `/laser_on` (`std_msgs/Bool`) —— 激光控制
+
+
+* **轮询机制（`spinOnce`）**：底层采用单线程轮询。宿主机发布话题后，底层节点会在下一个轮询周期内暂停主循环，优先触发对应的回调函数（`servoCallback` 或 `laserCallback`）执行硬件动作。
+* **硬件反相说明**：由于激光硬件模块采用低电平触发，底层代码已在内部做了解耦和反相处理。**软件上层无需进行逻辑反转**，依然保持 `true` 为开、`false` 为关的常规逻辑。
+
+---
+
+## 2. 软件启动与调度命令
+
+在联调或运行整体主程序时，请按照以下步骤启动相关调度节点。
+
+### 步骤一：启动 ROS Master
+
+```bash
+roscore
+
+```
+
+### 步骤二：启动通信桥梁节点（Launch）
+
+使用项目封装好的 Launch 文件，该文件会自动调用 `rosserial_python` 节点，并锁定串口通信波特率（57600）。请确保 Arduino 已连接至宿主机：
+
+```bash
+# 进入工作空间并刷新环境变量
+cd ~/Drone_Project/arduino_ws
+source devel/setup.bash
+
+# 运行控制模块的 launch 文件
+roslaunch laser_servo_control laser_servo_control.launch
+
+```
+
+---
+
+## 3. 终端测试与控制接口
+
+节点正常运行后，可以通过新开终端直接发布以下话题进行软件层面的联调测试：
+
+### 3.1 投放舵机控制（Dropper）
+
+* **话题接口**：`/dropper_open`
+* **消息类型**：`std_msgs/Bool`
+* **调试命令**：
+```bash
+# 触发投放动作（舵机转至 135°）
+rostopic pub -1 /dropper_open std_msgs/Bool "data: true"
+
+# 投放机构复位（舵机回到 90°）
+rostopic pub -1 /dropper_open std_msgs/Bool "data: false"
+
+```
+
+
+
+### 3.2 激光模块控制（Laser）
+
+* **话题接口**：`/laser_on`
+* **消息类型**：`std_msgs/Bool`
+* **调试命令**：
+```bash
+# 开启激光笔
+rostopic pub -1 /laser_on std_msgs/Bool "data: true"
+
+# 关闭激光笔
+rostopic pub -1 /laser_on std_msgs/Bool "data: false"
+
+```
+
+
+
+### 3.3 状态监控
+
+如果需要确认底层节点是否成功接收并执行了命令，可以在终端通过监听 `/rosout` 或使用如下命令查看底层通过串口返回的日志信息：
+
+```bash
+rostopic echo /rosout
+
+```
+
+当动作触发时，终端会打印 `[INFO]: Dropper Action: OPEN` 或 `[INFO]: Laser Status: ON` 等调试反馈。

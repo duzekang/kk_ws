@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<launch>
+  <arg name="config" default="$(find radar_curve_planner)/config/planner_params.yaml" />
+  <arg name="mission_config" default="$(find radar_curve_planner)/config/mission_params.yaml" />
+  <arg name="use_rviz" default="false" />
+  <arg name="rviz_config" default="$(find radar_curve_planner)/rviz/radar_curve_planner.rviz" />
+  <arg name="shutdown_launch_when_writer_exits" default="false" />
+
+  <rosparam command="load" file="$(arg config)" />
+  <rosparam command="load" file="$(arg mission_config)" />
+
+  <node pkg="radar_curve_planner" type="radar_midpoint_node" name="radar_midpoint_node" output="screen" required="false" />
+  <node pkg="radar_curve_planner" type="curve_yaml_writer_node" name="curve_yaml_writer_node" output="screen" required="$(arg shutdown_launch_when_writer_exits)" />
+
+  <group if="$(arg use_rviz)">
+    <node pkg="rviz" type="rviz" name="radar_curve_planner_rviz" args="-d $(arg rviz_config)" output="screen" required="false" />
+  </group>
+</launch>

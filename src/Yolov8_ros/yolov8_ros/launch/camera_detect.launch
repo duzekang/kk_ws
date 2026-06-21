@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<launch>
+  <!-- 单下方摄像头 + YOLO。完整双摄请使用 camera_detect_dual.launch。 -->
+
+  <arg name="video_device"  default="/dev/video0"/>
+  <arg name="image_width"   default="640"/>
+  <arg name="image_height"  default="480"/>
+  <arg name="pixel_format"  default="yuyv"/>
+
+  <node name="usb_cam" pkg="usb_cam" type="usb_cam_node" output="screen">
+    <param name="video_device"    value="$(arg video_device)"/>
+    <param name="image_width"     value="$(arg image_width)"/>
+    <param name="image_height"    value="$(arg image_height)"/>
+    <param name="pixel_format"    value="$(arg pixel_format)"/>
+    <param name="camera_frame_id" value="usb_cam"/>
+    <param name="io_method"       value="mmap"/>
+  </node>
+
+  <arg name="weight_path"     default="$(find yolov8_ros)/weights/abdown.pt"/>
+  <arg name="image_topic"     default="/usb_cam/image_raw"/>
+  <arg name="pub_topic"       default="/object_position"/>
+  <arg name="conf"            default="0.5"/>
+  <arg name="use_cpu"         default="false"/>
+  <arg name="visualize"       default="false"/>
+  <arg name="enhanced"        default="true"/>
+  <arg name="frame_skip"      default="1"/>
+
+  <include file="$(find yolov8_ros)/launch/ros_predict.launch">
+    <arg name="weight_path" value="$(arg weight_path)"/>
+    <arg name="image_topic" value="$(arg image_topic)"/>
+    <arg name="active_camera" value="down"/>
+    <arg name="pub_topic" value="$(arg pub_topic)"/>
+    <arg name="conf" value="$(arg conf)"/>
+    <arg name="use_cpu" value="$(arg use_cpu)"/>
+    <arg name="visualize" value="$(arg visualize)"/>
+    <arg name="enhanced" value="$(arg enhanced)"/>
+    <arg name="frame_skip" value="$(arg frame_skip)"/>
+  </include>
+</launch>
