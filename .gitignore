@@ -1,0 +1,13 @@
+# ROS workspace
+build/
+devel/
+install/
+.catkin_workspace
+
+# Python
+*.pyc
+__pycache__/
+
+# OS generated files
+.DS_Store
+*~
