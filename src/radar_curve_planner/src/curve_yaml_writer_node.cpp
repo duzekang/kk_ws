@@ -48,7 +48,7 @@ public:
     fitted_path_pub_ = nh_.advertise<nav_msgs::Path>(fitted_path_topic_, 1, true);
     marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>(marker_topic_, 1, true);
     valid_pub_ = nh_.advertise<std_msgs::Bool>(path_valid_topic_, 1, true);
-    ROS_INFO("[curve_writer] smooth writer started. input=%s output=%s mode=%s", midpoints_topic_.c_str(), output_yaml_.c_str(), curve_mode_.c_str());
+    ROS_INFO("[curve_writer] strict smooth writer started. input=%s output=%s mode=%s", midpoints_topic_.c_str(), output_yaml_.c_str(), curve_mode_.c_str());
   }
 
 private:
@@ -68,14 +68,17 @@ private:
     pnh_.param("drone_diameter", drone_diameter_, 0.85);
     pnh_.param("safety_margin", safety_margin_, 0.04);
 
-    // Must match radar_midpoint_node: validate YAML using the same 2D height-slice projection.
+    // Must match radar_midpoint_node: validate YAML using strict all-point 2D projection.
+    // The output trajectory is XY-only, so every finite cloud point is projected to XY
+    // as an obstacle. There is no height slice and no z-band screening.
     pnh_.param("project_pointcloud_to_2d", project_pointcloud_to_2d_, true);
-    pnh_.param("use_height_slice_projection", use_height_slice_projection_, true);
+    pnh_.param("project_all_finite_points_to_2d", project_all_finite_points_to_2d_, true);
+    pnh_.param("use_height_slice_projection", use_height_slice_projection_, false);
     pnh_.param("projection_slice_center_z", projection_slice_center_z_, 0.80);
     pnh_.param("projection_slice_half_width", projection_slice_half_width_, 0.15);
-    pnh_.param("projection_min_z", projection_min_z_, 0.65);
-    pnh_.param("projection_max_z", projection_max_z_, 0.95);
-    if (project_pointcloud_to_2d_ && use_height_slice_projection_) {
+    pnh_.param("projection_min_z", projection_min_z_, -1000.0);
+    pnh_.param("projection_max_z", projection_max_z_, 1000.0);
+    if (project_pointcloud_to_2d_ && use_height_slice_projection_ && !project_all_finite_points_to_2d_) {
       const double hw = std::fabs(projection_slice_half_width_);
       projection_min_z_ = projection_slice_center_z_ - hw;
       projection_max_z_ = projection_slice_center_z_ + hw;
@@ -85,8 +88,9 @@ private:
     pnh_.param("use_2d_z_filter", use_2d_z_filter_, true);
     pnh_.param("obstacle_min_z", obstacle_min_z_, 0.60);
     pnh_.param("obstacle_max_z", obstacle_max_z_, 2.00);
-    pnh_.param("self_filter_radius", self_filter_radius_, 0.90);
-    pnh_.param("start_ignore_curve_distance", start_ignore_curve_distance_, 0.80);
+    // Strict mode: do not ignore near-start cloud and do not skip the first path segment.
+    pnh_.param("self_filter_radius", self_filter_radius_, 0.0);
+    pnh_.param("start_ignore_curve_distance", start_ignore_curve_distance_, 0.0);
 
     pnh_.param("enable_virtual_wall", enable_virtual_wall_, true);
     pnh_.param("virtual_wall_min_x", wall_min_x_, -3.0);
@@ -95,7 +99,8 @@ private:
     pnh_.param("virtual_wall_max_y", wall_max_y_, 1e9);
     pnh_.param("virtual_wall_margin", wall_margin_, 0.0);
 
-    pnh_.param("min_collision_points", min_collision_points_, 24);
+    // Strict collision check: one projected point inside the footprint is enough to reject the path.
+    pnh_.param("min_collision_points", min_collision_points_, 1);
     pnh_.param("resample_step", resample_step_, 0.08);
     pnh_.param("max_curvature", max_curvature_, 999.0);
     pnh_.param("max_turn_angle_deg", max_turn_angle_deg_, 179.0);
@@ -131,15 +136,17 @@ private:
         const double z = *iter_z;
         if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
         if (project_pointcloud_to_2d_) {
-          // Validate with the same height-slice 2D projection as the planner.
-          // The final trajectory uses XY, so points in this slice block the footprint.
-          if (z < projection_min_z_ || z > projection_max_z_) continue;
+          // Strict all-point XY compression: no z-height screening.
+          // Only when project_all_finite_points_to_2d is explicitly false do we use
+          // the legacy height slice.
+          if (!project_all_finite_points_to_2d_ &&
+              (z < projection_min_z_ || z > projection_max_z_)) {
+            continue;
+          }
         } else if (use_2d_z_filter_ && (z < obstacle_min_z_ || z > obstacle_max_z_)) {
           continue;
         }
-        const double dx = x - start.x;
-        const double dy = y - start.y;
-        if (std::sqrt(dx * dx + dy * dy) < self_filter_radius_) continue;
+        // Strict safety: no self/near-start XY filtering. Nearby points remain obstacles.
         pts.push_back(Pt2{x, y});
       }
     } catch (const std::exception& e) {
@@ -268,10 +275,7 @@ private:
         p.y = a.y * (1.0 - t) + b.y * t;
         p.z = a.z * (1.0 - t) + b.z * t;
         const double s_here = s_acc + seg * t;
-        if (s_here < start_ignore_curve_distance_) {
-          ++sample_index;
-          continue;
-        }
+        // Strict safety: validate from s=0. No start segment is skipped.
         int near = 0;
         for (const Pt2& q : obs) {
           const double dx = p.x - q.x;
@@ -443,11 +447,11 @@ private:
     }
 
     const double collision_radius = drone_diameter_ * 0.5 + safety_margin_;
-    ROS_INFO("[curve_writer] curve=%zu mode=%s length=%.2fm valid=%d reason=%s max_curv=%.3f max_angle=%.1fdeg collision_radius=%.2f near_points=%d min_collision_points=%d self_filter=%.2f start_ignore_s=%.2f wall_bad=%d wall_v=%.3f cloud_pts=%zu projection=%s[%.2f,%.2f]",
+    ROS_INFO("[curve_writer] curve=%zu mode=%s length=%.2fm valid=%d reason=%s max_curv=%.3f max_angle=%.1fdeg collision_radius=%.2f near_points=%d min_collision_points=%d near_ignore=OFF start_ignore_s=0.00 wall_bad=%d wall_v=%.3f cloud_pts=%zu projection=%s[%.2f,%.2f]",
              path.size(), curve_mode_.c_str(), pathLength(path), valid ? 1 : 0, reason.c_str(), max_curv, max_angle,
-             collision_radius, near_points, min_collision_points_, self_filter_radius_, start_ignore_curve_distance_,
+             collision_radius, near_points, min_collision_points_,
              wall_bad ? 1 : 0, wall_v, latest_cloud_ ? static_cast<size_t>(latest_cloud_->width * latest_cloud_->height) : 0,
-             project_pointcloud_to_2d_ ? (use_height_slice_projection_ ? "slice2d" : "column2d") : "height_band",
+             project_pointcloud_to_2d_ ? (project_all_finite_points_to_2d_ ? "all_points_2d" : (use_height_slice_projection_ ? "slice2d" : "column2d")) : "height_band",
              project_pointcloud_to_2d_ ? projection_min_z_ : obstacle_min_z_,
              project_pointcloud_to_2d_ ? projection_max_z_ : obstacle_max_z_);
 
@@ -468,15 +472,16 @@ private:
   std::string output_yaml_, traj_name_, output_coordinate_mode_, curve_mode_;
   double flight_height_ = 1.0, drone_diameter_ = 0.85, safety_margin_ = 0.04;
   bool project_pointcloud_to_2d_ = true;
-  bool use_height_slice_projection_ = true;
+  bool project_all_finite_points_to_2d_ = true;
+  bool use_height_slice_projection_ = false;
   double projection_slice_center_z_ = 0.80, projection_slice_half_width_ = 0.15;
-  double projection_min_z_ = 0.65, projection_max_z_ = 0.95;
+  double projection_min_z_ = -1000.0, projection_max_z_ = 1000.0;
   bool use_2d_z_filter_ = true;
   double obstacle_min_z_ = 0.60, obstacle_max_z_ = 2.00;
-  double self_filter_radius_ = 0.90, start_ignore_curve_distance_ = 0.80;
+  double self_filter_radius_ = 0.0, start_ignore_curve_distance_ = 0.0;
   bool enable_virtual_wall_ = true;
   double wall_min_x_ = -3.0, wall_min_y_ = -3.0, wall_max_x_ = 1e9, wall_max_y_ = 1e9, wall_margin_ = 0.0;
-  int min_collision_points_ = 24;
+  int min_collision_points_ = 1;
   double resample_step_ = 0.08, max_curvature_ = 999.0, max_turn_angle_deg_ = 179.0, min_segment_len_ = 0.02, sample_step_ = 0.06;
   bool write_even_if_invalid_ = false, one_shot_ = false, one_shot_require_valid_ = true, print_collision_cloud_count_ = true;
 };

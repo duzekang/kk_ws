@@ -52,7 +52,7 @@ public:
     cloud_sub_ = nh_.subscribe(cloud_topic_, 1, &RadarMidpointNode::cloudCb, this);
     pose_sub_ = nh_.subscribe(pose_topic_, 1, &RadarMidpointNode::poseCb, this);
     timer_ = nh_.createTimer(ros::Duration(1.0 / std::max(0.2, max_plan_rate_)), &RadarMidpointNode::timerCb, this);
-    ROS_INFO("[radar_midpoint] smooth EGO-LITE node started. cloud=%s pose=%s frame=%s", cloud_topic_.c_str(), pose_topic_.c_str(), frame_id_.c_str());
+    ROS_INFO("[radar_midpoint] strict smooth EGO-LITE node started. cloud=%s pose=%s frame=%s", cloud_topic_.c_str(), pose_topic_.c_str(), frame_id_.c_str());
   }
 
 private:
@@ -88,17 +88,17 @@ private:
     pnh_.param("safety_margin", safety_margin_, 0.04);
     pnh_.param("obstacle_inflation_extra", obstacle_inflation_extra_, 0.0);
 
-    // 2D projection mode. By default we use a horizontal slice near the flight height:
-    // z = projection_slice_center_z +/- projection_slice_half_width.
-    // Points in this slice are compressed to XY obstacles, avoiding ground clutter while
-    // still preventing the XY-only trajectory from crossing obstacles at flight height.
+    // Strict all-point 2D projection mode.
+    // The output trajectory only contains XY, so EVERY finite point in the cloud is
+    // projected to XY as an obstacle. There is no height slice and no z-band screening.
     pnh_.param("project_pointcloud_to_2d", project_pointcloud_to_2d_, true);
-    pnh_.param("use_height_slice_projection", use_height_slice_projection_, true);
+    pnh_.param("project_all_finite_points_to_2d", project_all_finite_points_to_2d_, true);
+    pnh_.param("use_height_slice_projection", use_height_slice_projection_, false);
     pnh_.param("projection_slice_center_z", projection_slice_center_z_, 0.80);
     pnh_.param("projection_slice_half_width", projection_slice_half_width_, 0.15);
-    pnh_.param("projection_min_z", projection_min_z_, 0.65);
-    pnh_.param("projection_max_z", projection_max_z_, 0.95);
-    if (project_pointcloud_to_2d_ && use_height_slice_projection_) {
+    pnh_.param("projection_min_z", projection_min_z_, -1000.0);
+    pnh_.param("projection_max_z", projection_max_z_, 1000.0);
+    if (project_pointcloud_to_2d_ && use_height_slice_projection_ && !project_all_finite_points_to_2d_) {
       const double hw = std::fabs(projection_slice_half_width_);
       projection_min_z_ = projection_slice_center_z_ - hw;
       projection_max_z_ = projection_slice_center_z_ + hw;
@@ -108,7 +108,8 @@ private:
     pnh_.param("use_2d_z_filter", use_2d_z_filter_, true);
     pnh_.param("obstacle_min_z", obstacle_min_z_, 0.60);
     pnh_.param("obstacle_max_z", obstacle_max_z_, 2.00);
-    pnh_.param("self_filter_radius", self_filter_radius_, 0.90);
+    // Strict mode: do not ignore near-start point cloud. Keep parameter only for log/backward compatibility.
+    pnh_.param("self_filter_radius", self_filter_radius_, 0.0);
 
     pnh_.param("enable_virtual_wall", enable_virtual_wall_, true);
     pnh_.param("virtual_wall_min_x", wall_min_x_, -3.0);
@@ -123,8 +124,9 @@ private:
     pnh_.param("max_search_time", max_search_time_, 0.35);
     pnh_.param("allow_diagonal", allow_diagonal_, true);
 
-    pnh_.param("clear_start_radius", clear_start_radius_, 0.95);
-    pnh_.param("clear_goal_radius", clear_goal_radius_, 0.25);
+    // Strict mode: do not clear occupied cells around start/goal. If start/goal is occupied, planning fails.
+    pnh_.param("clear_start_radius", clear_start_radius_, 0.0);
+    pnh_.param("clear_goal_radius", clear_goal_radius_, 0.0);
 
     pnh_.param("enable_line_of_sight_prune", enable_los_prune_, true);
     pnh_.param("enable_corner_rounding", enable_corner_rounding_, true);
@@ -181,14 +183,18 @@ private:
         const double z = *iter_z;
         if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
         if (project_pointcloud_to_2d_) {
-          // Height-slice 2D compression: obstacle points near the selected slice height
-          // block the XY trajectory; low ground clutter outside the slice is ignored.
-          if (z < projection_min_z_ || z > projection_max_z_) continue;
+          // Strict all-point XY compression: no z-height screening.
+          // Only when project_all_finite_points_to_2d is explicitly false do we use
+          // the legacy height slice.
+          if (!project_all_finite_points_to_2d_ &&
+              (z < projection_min_z_ || z > projection_max_z_)) {
+            continue;
+          }
         } else if (use_2d_z_filter_ && (z < obstacle_min_z_ || z > obstacle_max_z_)) {
           continue;
         }
         const Pt2 p{x, y};
-        if (dist2(p, start) < self_filter_radius_) continue;
+        // Strict safety: no self/near-start XY filtering. Nearby points remain obstacles.
         pts.push_back(p);
       }
     } catch (const std::exception& e) {
@@ -247,8 +253,12 @@ private:
       }
     }
 
-    clearCircle(g, start, clear_start_radius_);
-    clearCircle(g, goal, clear_goal_radius_);
+    // Strict safety: do not clear cells around start or goal.
+    // If an obstacle is detected near the current pose, A* must report occupied/no path instead of crossing it.
+    (void)start;
+    (void)goal;
+    (void)clear_start_radius_;
+    (void)clear_goal_radius_;
     reason = "ok";
     return g;
   }
@@ -288,7 +298,8 @@ private:
       return {};
     }
     if (!g.isFree(sx, sy) || !g.isFree(gx, gy)) {
-      reason = "start_or_goal_occupied";
+      if (!g.isFree(sx, sy)) reason = "start_occupied_by_projected_obstacle";
+      else reason = "goal_occupied_by_projected_obstacle";
       return {};
     }
 
@@ -636,9 +647,9 @@ private:
 
     std::vector<Pt2> raw = astar(grid, start, goal, reason);
     if (raw.empty()) {
-      ROS_WARN_THROTTLE(1.0, "[radar_midpoint] EGO-LITE-SMOOTH-2D plan: success=0 reason=%s cloud_total=%d projected_obs=%zu grid=%dx%d safe_radius=%.2f projection=%s[%.2f,%.2f]",
+      ROS_WARN_THROTTLE(1.0, "[radar_midpoint] EGO-LITE-ALLPOINTS-STRICT plan: success=0 reason=%s cloud_total=%d projected_obs=%zu grid=%dx%d safe_radius=%.2f projection=%s[%.2f,%.2f] near_ignore=OFF start_clear=OFF",
                         reason.c_str(), cloud_total_, obs.size(), grid.w, grid.h, safe_radius,
-                        project_pointcloud_to_2d_ ? (use_height_slice_projection_ ? "slice2d" : "column2d") : "height_band",
+                        project_pointcloud_to_2d_ ? (project_all_finite_points_to_2d_ ? "all_points_2d" : (use_height_slice_projection_ ? "slice2d" : "column2d")) : "height_band",
                         project_pointcloud_to_2d_ ? projection_min_z_ : obstacle_min_z_,
                         project_pointcloud_to_2d_ ? projection_max_z_ : obstacle_max_z_);
       return;
@@ -666,9 +677,9 @@ private:
 
     if (print_plan_) {
       ROS_INFO_THROTTLE(0.2,
-        "[radar_midpoint] EGO-LITE-SMOOTH-2D plan: success=1 reason=%s cloud_total=%d projected_obs=%zu grid=%dx%d raw=%zu pruned=%zu smooth=%zu out=%zu len=%.2f min_clear=%.2f safe_radius=%.2f projection=%s[%.2f,%.2f] wall=x>=%.2f,y>=%.2f rounding=%d smoothing=%d",
+        "[radar_midpoint] EGO-LITE-ALLPOINTS-STRICT plan: success=1 reason=%s cloud_total=%d projected_obs=%zu grid=%dx%d raw=%zu pruned=%zu smooth=%zu out=%zu len=%.2f min_clear=%.2f safe_radius=%.2f projection=%s[%.2f,%.2f] wall=x>=%.2f,y>=%.2f rounding=%d smoothing=%d near_ignore=OFF start_clear=OFF",
         reason.c_str(), cloud_total_, obs.size(), grid.w, grid.h, raw.size(), pruned.size(), smoothed.size(), out.size(), pathLength(out), minClearance(out, obs), safe_radius,
-        project_pointcloud_to_2d_ ? (use_height_slice_projection_ ? "slice2d" : "column2d") : "height_band",
+        project_pointcloud_to_2d_ ? (project_all_finite_points_to_2d_ ? "all_points_2d" : (use_height_slice_projection_ ? "slice2d" : "column2d")) : "height_band",
         project_pointcloud_to_2d_ ? projection_min_z_ : obstacle_min_z_,
         project_pointcloud_to_2d_ ? projection_max_z_ : obstacle_max_z_,
         wall_min_x_, wall_min_y_, enable_corner_rounding_ ? 1 : 0, enable_path_smoothing_ ? 1 : 0);
@@ -695,17 +706,18 @@ private:
   double flight_height_ = 1.0;
   double drone_diameter_ = 0.85, safety_margin_ = 0.04, obstacle_inflation_extra_ = 0.0;
   bool project_pointcloud_to_2d_ = true;
-  bool use_height_slice_projection_ = true;
+  bool project_all_finite_points_to_2d_ = true;
+  bool use_height_slice_projection_ = false;
   double projection_slice_center_z_ = 0.80, projection_slice_half_width_ = 0.15;
-  double projection_min_z_ = 0.65, projection_max_z_ = 0.95;
+  double projection_min_z_ = -1000.0, projection_max_z_ = 1000.0;
   bool use_2d_z_filter_ = true;
-  double obstacle_min_z_ = 0.60, obstacle_max_z_ = 2.00, self_filter_radius_ = 0.90;
+  double obstacle_min_z_ = 0.60, obstacle_max_z_ = 2.00, self_filter_radius_ = 0.0;
   bool enable_virtual_wall_ = true;
   double wall_min_x_ = -3.0, wall_min_y_ = -3.0, wall_max_x_ = 1e9, wall_max_y_ = 1e9, wall_margin_ = 0.0;
   double grid_res_ = 0.10, grid_padding_ = 2.80, max_search_time_ = 0.35;
   int max_grid_cells_ = 250000;
   bool allow_diagonal_ = true;
-  double clear_start_radius_ = 0.95, clear_goal_radius_ = 0.25;
+  double clear_start_radius_ = 0.0, clear_goal_radius_ = 0.0;
   bool enable_los_prune_ = true, enable_corner_rounding_ = true, enable_path_smoothing_ = true;
   double corner_rounding_radius_ = 0.35;
   int corner_rounding_samples_ = 8;

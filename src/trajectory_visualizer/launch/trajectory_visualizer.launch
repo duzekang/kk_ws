@@ -3,7 +3,7 @@
   <!-- 默认不启动 RViz，因为比赛程序前面已经打开了 RViz。 -->
   <arg name="use_rviz" default="false" />
   <arg name="config" default="$(find trajectory_visualizer)/config/visualizer_params.yaml" />
-  <arg name="yaml_file" default="$(find trajectory_visualizer)/config/lll.yaml" />
+  <arg name="yaml_file" default="$(find complete_mission_kk)/cfg/lll.yaml" />
   <arg name="rviz_config" default="$(find trajectory_visualizer)/rviz/trajectory_visualizer.rviz" />
 
   <rosparam command="load" file="$(arg config)" />

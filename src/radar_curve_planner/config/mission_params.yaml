@@ -1,7 +1,8 @@
-# Smooth EGO-lite + height-slice 2D projection + virtual-wall mission configuration.
-# 目标：A* 保证可行通道，安全圆角/平滑让轨迹更圆润；若平滑后不安全，自动回退到安全折线。
-# 关键修正：最终轨迹只输出 x,y，因此这里截取 z=0.5m 附近的一层点云，再压缩成 2D 障碍。
-# 这样不会因为地面/低矮噪声把地图堵死，也不会在飞行高度截面上直接穿过障碍。
+# All-points strict 2D projection + smooth A* + virtual-wall mission configuration.
+# 核心安全原则：轨迹只输出 x,y，因此点云不能按高度“放行”。
+# 本版本把 /cloud_registered 中所有有限点全部压缩到 XY 平面作为障碍。
+# 不做高度切片、不做 z 过滤、不做近处点云忽略、不做起点清空、不做少量点阈值放行。
+# 如果点云障碍挡住路径，则规划失败；绝不生成从障碍物上方穿过的 YAML。
 # 虚拟墙：x >= -3.0 且 y >= -3.0。
 
 radar_midpoint_node:
@@ -18,27 +19,31 @@ radar_midpoint_node:
   flight_height: 1.0
 
   drone_diameter: 0.85
-  safety_margin: 0.10
+  safety_margin: 0.04
   obstacle_inflation_extra: 0.00
 
   # ========================
-  # 高度截面 2D 投影避障
+  # 全点云 2D 投影避障
   # ========================
-  # true：截取 z=0.5m 附近的一层点云，再压缩到 XY 平面。
-  # 默认截取 [0.65, 0.95]，即 0.5 ± 0.15m。
-  # 若障碍点云高度更稀疏，可把 half_width 加到 0.20 或 0.25。
+  # true：轨迹只输出 XY，所以所有有限点云点全部投影成 XY 障碍。
+  # 绝不通过 z 高度判断“可以从上方飞过”。
   project_pointcloud_to_2d: true
-  use_height_slice_projection: true
-  projection_slice_center_z: 0.50
-  projection_slice_half_width: 0.15
-  projection_min_z: 0.65
-  projection_max_z: 0.95
+  project_all_finite_points_to_2d: true
 
-  # 兼容旧模式：只有 project_pointcloud_to_2d=false 时才会使用下面三个参数。
-  use_2d_z_filter: true
-  obstacle_min_z: 0.60
-  obstacle_max_z: 2.00
-  self_filter_radius: 0.25
+  # 下面高度切片参数保留只是为了兼容旧代码；本模式下不使用。
+  use_height_slice_projection: false
+  projection_slice_center_z: 0.80
+  projection_slice_half_width: 0.15
+  projection_min_z: -1000.0
+  projection_max_z: 1000.0
+
+  # 兼容旧模式：只有 project_pointcloud_to_2d=false 时才会使用。
+  use_2d_z_filter: false
+  obstacle_min_z: -1000.0
+  obstacle_max_z: 1000.0
+
+  # 严格安全：不忽略近处点云。
+  self_filter_radius: 0.00
 
   enable_virtual_wall: true
   virtual_wall_min_x: -3.0
@@ -48,35 +53,37 @@ radar_midpoint_node:
   virtual_wall_margin: 0.00
 
   grid_resolution: 0.10
-  grid_padding: 2.80
-  max_grid_cells: 250000
-  max_search_time: 0.35
+  grid_padding: 3.20
+  max_grid_cells: 300000
+  max_search_time: 0.45
   allow_diagonal: true
 
-  clear_start_radius: 0.25
-  clear_goal_radius: 0.25
+  # 严格安全：不清空起点/终点周围栅格。若起点或终点被障碍占据，则直接失败。
+  clear_start_radius: 0.00
+  clear_goal_radius: 0.00
 
-  # A* 后处理：先视线剪枝，再安全圆角，再受约束迭代平滑。
+  # A* 后处理：所有剪枝/圆角/平滑都要经过占据栅格检查，不安全则回退或失败。
   enable_line_of_sight_prune: true
   enable_corner_rounding: true
-  corner_rounding_radius: 0.35
+  corner_rounding_radius: 0.30
   corner_rounding_samples: 8
 
   enable_path_smoothing: true
-  smoothing_iterations: 45
-  smoothing_alpha: 0.18
+  smoothing_iterations: 35
+  smoothing_alpha: 0.15
   smoothing_check_step: 0.04
 
-  # 输出点间距。越小越圆润，点数越多。
   output_spacing: 0.10
   min_output_points: 6
 
-  # 如果平滑后不安全，回退到未平滑的 A* 折线路径。
+  # 如果平滑后不安全，回退到 A* 视线剪枝后的安全折线。
   fallback_to_raw_if_smoothing_invalid: true
 
   publish_markers: true
-  allow_plan_without_cloud: true
-  publish_straight_when_no_cloud: true
+
+  # 严格安全：没有点云时不发布直线路径，避免盲飞穿障碍。
+  allow_plan_without_cloud: false
+  publish_straight_when_no_cloud: false
   print_pose: true
   print_plan: true
   status_period: 1.0
@@ -98,20 +105,25 @@ curve_yaml_writer_node:
   drone_diameter: 0.85
   safety_margin: 0.04
 
-  # 必须和 radar_midpoint_node 一致：最终 YAML 校验也按高度截面 2D 投影做。
+  # 必须和 radar_midpoint_node 一致：最终 YAML 校验也用全点云 2D 投影。
   project_pointcloud_to_2d: true
-  use_height_slice_projection: true
+  project_all_finite_points_to_2d: true
+
+  # 下面高度切片参数保留只是为了兼容旧代码；本模式下不使用。
+  use_height_slice_projection: false
   projection_slice_center_z: 0.80
   projection_slice_half_width: 0.15
-  projection_min_z: 0.65
-  projection_max_z: 0.95
+  projection_min_z: -1000.0
+  projection_max_z: 1000.0
 
-  # 兼容旧模式：只有 project_pointcloud_to_2d=false 时才会使用下面三个参数。
-  use_2d_z_filter: true
-  obstacle_min_z: 0.60
-  obstacle_max_z: 2.00
-  self_filter_radius: 0.90
-  start_ignore_curve_distance: 0.80
+  # 兼容旧模式：只有 project_pointcloud_to_2d=false 时才会使用。
+  use_2d_z_filter: false
+  obstacle_min_z: -1000.0
+  obstacle_max_z: 1000.0
+
+  # 严格安全：不忽略近处点云，不跳过起点段。
+  self_filter_radius: 0.00
+  start_ignore_curve_distance: 0.00
 
   enable_virtual_wall: true
   virtual_wall_min_x: -3.0
@@ -120,9 +132,10 @@ curve_yaml_writer_node:
   virtual_wall_max_y: 1000000000.0
   virtual_wall_margin: 0.00
 
-  min_collision_points: 24
+  # 严格安全：1 个投影点进入机体碰撞半径就判定无效。
+  min_collision_points: 1
 
-  # 这版输入已经是安全平滑轨迹，writer 默认只做 resample 和校验，不再二次 Catmull-Rom 外凸。
+  # 输入已经是安全平滑轨迹，writer 只做 resample 和校验，不做 Catmull-Rom 外凸。
   curve_mode: "resample"
   resample_step: 0.08
 

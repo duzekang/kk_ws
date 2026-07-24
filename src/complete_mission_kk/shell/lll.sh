@@ -39,7 +39,7 @@ tmux send-keys -t $SESSION:0.1 'sleep 4; roslaunch abot_bringup location.launch'
 tmux split-window -h -t $SESSION:0.1
 tmux send-keys -t $SESSION:0.2 'sleep 4; source ~/kk_ws/devel/setup.bash; roslaunch obstacle_detector obstacle_detector.launch' C-m
 
-# Pane 0.3: laser
+# Pane 0.3: trajectory_visualizer
 tmux split-window -h -t $SESSION:0.2
 tmux send-keys -t $SESSION:0.3 'echo " 启动激光笔/投货..."; sleep 3; source ~/kk_ws/devel/setup.bash; roslaunch laser_servo_control laser_servo_control.launch' C-m
 
@@ -62,7 +62,7 @@ tmux split-window -h -t $SESSION:1
 tmux send-keys -t $SESSION:1.1 'sleep 4; source ~/kk_ws/devel/setup.bash; rostopic echo /yolo/detections ' C-m
 
 tmux split-window -h -t $SESSION:1.1
-tmux send-keys -t $SESSION:1.2 'sleep 12; source ~/kk_ws/devel/setup.bash; roslaunch trajectory_visualizer trajectory_visualizer.launch use_rviz:=true' C-m
+tmux send-keys -t $SESSION:1.2 'sleep 8; source ~/kk_ws/devel/setup.bash; roslaunch trajectory_visualizer trajectory_visualizer.launch use_rviz:=true' C-m
 
 tmux split-window -h -t $SESSION:1.2
 tmux send-keys -t $SESSION:1.3 'sleep 8; source ~/kk_ws/devel/setup.bash; roslaunch complete_mission_kk lll.launch' C-m

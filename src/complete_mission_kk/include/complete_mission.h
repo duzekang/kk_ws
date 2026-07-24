@@ -113,7 +113,6 @@ bool  mission_pos_cruise(float x, float y, float z, float yaw, float error_max)
 	&& fabs(local_pos.pose.pose.position.y-y-init_position_y_take_off)<error_max
 	&& fabs(local_pos.pose.pose.position.z-z-init_position_z_take_off)<error_max)
 	{
-		ROS_INFO("到达目标点，巡航点任务完成");
 		mission_pos_cruise_flag = false;
 		return true;
 	}
@@ -1149,3 +1148,4 @@ bool loadTrajectoryArray(ros::NodeHandle& nh, const std::string& param_name, std
 
 /*-----------------------------视觉识别--------------------------*/
 void yolo_cb(const yolov8_ros_msgs::YoloDetection::ConstPtr& msg);
+void yolo_forward_cb(const yolov8_ros_msgs::YoloDetection::ConstPtr& msg);

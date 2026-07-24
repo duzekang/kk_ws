@@ -5,7 +5,6 @@ int mission_num = 0;  //确定当前任务
 int tmp_marker_id = 1;
 int takeoff_id = 0;
 int route ;//路线选择
-ros::Publisher shoot_control_pub;  // 在 main() 外声明
 float target1_x = 0, target1_y = 0; //第一个门前
 float target2_x = 0, target2_y = 0; //穿门后
 float target3_x = 0, target3_y = 0; //中间点
@@ -16,10 +15,20 @@ float origin_x = 0.0;
 float origin_y = 0.0;
 float origin_z = 0.0;
 
-float targetA_x = 0, targetA_y = 0; //A识别点
-float targetB_x = 0, targetB_y = 0; //B识别点
+float targetL_x = 0, targetL_y = 0; //左识别点
+float targetR_x = 0, targetR_y = 0; //右识别点
+float targetA_x = 0, targetA_y = 0;
+float targetB_x = 0, targetB_y = 0;
+string AB;
+bool isDown = false;
+bool isDrop = false;
+bool first_laser = true;
+ros::Time laser_time;
+
 string laser_target;
 string yolo_result;
+string yolo_forward_result;
+float yolo_x;
 
 float err_max = 10;
 float speed = 0;
@@ -60,8 +69,8 @@ void print_param()
   std::cout << "target3 : ( " << target3_x << ", " << target3_y << " )" << std::endl;
   std::cout << "target4 : ( " << target4_x << ", " << target4_y << " )" << std::endl;
   std::cout << "target5 : ( " << target5_x << ", " << target5_y << " )" << std::endl;
-  std::cout << "targetA : ( " << targetA_x << ", " << targetA_y << " )" << std::endl;
-  std::cout << "targetB : ( " << targetB_x << ", " << targetB_y << " )" << std::endl;
+  std::cout << "targetL : ( " << targetL_x << ", " << targetL_y << " )" << std::endl;
+  std::cout << "targetR : ( " << targetR_x << ", " << targetR_y << " )" << std::endl;
   std::cout << "err_max: " << err_max << std::endl;
   std::cout << "speed: " << speed << std::endl;
   std::cout << "height: " << height << std::endl;
@@ -70,12 +79,9 @@ void print_param()
   std::cout << "slow_down_radius: " << slow_down_radius << std::endl;
 }
 
-void trigger_laser(bool flag)
+void trigger_laser()
 {
-  std_msgs::Bool msg;
-  msg.data = flag;
-  laser_fire_pub.publish(msg);
-  ROS_INFO("[Laser Trigger] 已发送激光触发信号");
+  
 }
 
 void trigger_drop(bool flag)
@@ -96,21 +102,41 @@ void camera_switch(){
   }
 }
 
+void calc_AB(){
+  if((yolo_x < 150 && yolo_forward_result == "A")||(yolo_x > 150 && yolo_forward_result == "B")){//A左B右
+    targetA_x = targetL_x;
+    targetA_y = targetL_y;
+    targetB_x = targetR_x;
+    targetB_y = targetR_y;
+    AB = "A左B右";
+  }else if((yolo_x < 150 && yolo_forward_result == "B")||(yolo_x > 150 && yolo_forward_result == "A")){//A右B左
+    targetA_x = targetR_x;
+    targetA_y = targetR_y;
+    targetB_x = targetL_x;
+    targetB_y = targetL_y;
+    AB = "A右B左";
+  }
+}
+
 void print_publish()
 {
-  std::cout<< "setpoint_raw.x:"<<setpoint_raw.position.x<<std::endl;
+  // std::cout<< "setpoint_raw.x:"<<setpoint_raw.position.x<<std::endl;
   
-  std::cout<< "setpoint_raw.y:"<<setpoint_raw.position.y<<std::endl;
+  // std::cout<< "setpoint_raw.y:"<<setpoint_raw.position.y<<std::endl;
   
-  std::cout<< "setpoint_raw.z:"<<setpoint_raw.position.z<<std::endl;
+  // std::cout<< "setpoint_raw.z:"<<setpoint_raw.position.z<<std::endl;
   
-  std::cout<< "setpoint_raw.yaw:"<<setpoint_raw.yaw<<std::endl;
+  // std::cout<< "setpoint_raw.yaw:"<<setpoint_raw.yaw<<std::endl;
 
   std::cout<<"now_mission_number:"<<mission_num<<std::endl;
 
   std::cout<<"route:"<<route<<std::endl;
 
   std::cout<<"laser_target:"<<laser_target<<std::endl;
+
+  std::cout<<"yolo_result:"<<yolo_result<<std::endl;
+
+  std::cout<<"AB:"<<AB<<std::endl;
 
 }
 
@@ -125,7 +151,17 @@ void obstacle_cb(const obstacle_detector::ObstacleStatus::ConstPtr& msg){
 }
 
 void yolo_cb(const yolov8_ros_msgs::YoloDetection::ConstPtr& msg){
-  yolo_result = msg->class_name;
+  if(mission_num >= 5){
+    yolo_result = msg->class_name;
+  }
+}
+
+void yolo_forward_cb(const yolov8_ros_msgs::YoloDetection::ConstPtr& msg){
+  if(mission_num >= 4){
+    yolo_forward_result = msg->class_name;
+    yolo_x = msg->x;
+  }
+  
 }
 
 int main(int argc, char **argv)
@@ -157,6 +193,8 @@ int main(int argc, char **argv)
   //订阅识别
   ros::Subscriber yolo_sub = nh.subscribe<yolov8_ros_msgs::YoloDetection>("/yolo/detections", 10, yolo_cb);
 
+  ros::Subscriber yolo_forward_sub = nh.subscribe<yolov8_ros_msgs::YoloDetection>("/yolo/detections_forward", 10, yolo_forward_cb);
+
   //订阅障碍物类型消息
   ros::Subscriber obstacle_sub = nh.subscribe<obstacle_detector::ObstacleStatus>("/obstacle/result", 10, obstacle_cb);
 
@@ -168,8 +206,6 @@ int main(int argc, char **argv)
 
   // 创建一个服务客户端，连接名为/mavros/set_mode的服务，用于请求无人机进入offboard模式
   ros::ServiceClient set_mode_client = nh.serviceClient<mavros_msgs::SetMode>("mavros/set_mode");
-
-  shoot_control_pub = nh.advertise<std_msgs::Bool>("/shoot_control_topic", 10);
 
   cargo_drop_pub = nh.advertise<std_msgs::Bool>("/dropper_open", 10);
 
@@ -198,11 +234,11 @@ int main(int argc, char **argv)
   nh.param<float>("target5_x", target5_x, 0);
   nh.param<float>("target5_y", target5_y, 0);
 
-  nh.param<float>("targetA_x", targetA_x, 0);
-  nh.param<float>("targetA_y", targetA_y, 0);
+  nh.param<float>("targetL_x", targetL_x, 0);
+  nh.param<float>("targetL_y", targetL_y, 0);
 
-  nh.param<float>("targetB_x", targetB_x, 0);
-  nh.param<float>("targetB_y", targetB_y, 0);
+  nh.param<float>("targetR_x", targetR_x, 0);
+  nh.param<float>("targetR_y", targetR_y, 0);
 
   nh.param<float>("err_max", err_max, 0);
   nh.param<float>("speed", speed, 0.1);
@@ -276,7 +312,7 @@ int main(int argc, char **argv)
         mission_num = 1; //开始任务
         break;
      }
-     mission_pos_cruise(0, 0, ALTITUDE, 0, err_max); 
+     mission_pos_cruise(0, 0, ALTITUDE, 0, 0.2); 
      mavros_setpoint_pos_pub.publish(setpoint_raw);
      
      ros::spinOnce();
@@ -311,30 +347,30 @@ int main(int argc, char **argv)
     case 1: //悬停
       if (mission_pos_cruise(0, 0, ALTITUDE, 0, 0))
       {
-        if (lib_time_record_func(2.0, ros::Time::now())){
-          mission_num = 2;
+        if (lib_time_record_func(1.5, ros::Time::now())){
+          mission_num = 3;
           last_request = ros::Time::now();
         }
       }
       else if(ros::Time::now() - last_request >= ros::Duration(4.0))
       {
-        mission_num = 2;
+        mission_num = 3;
         last_request = ros::Time::now();
         ROS_WARN("Timed out!!!!");
       }
       
       break;
     
-    case 2://导航到第一个门前
-      if (mission_pos_cruise(target1_x, target1_y, ALTITUDE, 0, 0.2))
-      {
-        if (lib_time_record_func(1.0, ros::Time::now()))
-        {
-          mission_num = 3;
-          last_request = ros::Time::now();
-        }
-      }
-      break;
+    // case 2://导航到第一个门前
+    //   if (mission_pos_cruise(target1_x, target1_y, ALTITUDE, 0, 0.2))
+    //   {
+    //     if (lib_time_record_func(1.0, ros::Time::now()))
+    //     {
+    //       mission_num = 3;
+    //       last_request = ros::Time::now();
+    //     }
+    //   }
+    //   break;
 
     case 3://穿门（直接定点穿）
       if (mission_pos_cruise(target2_x, target2_y, ALTITUDE, 0, 0.2))
@@ -382,155 +418,206 @@ int main(int argc, char **argv)
       }
       break;
     
-    case 40:
+    case 40://飞到中间点并计算A/B位置
       if(mission_pos_cruise(target4_x, target4_y, ALTITUDE, 0, 0.2)){
-          if (lib_time_record_func(1.5, ros::Time::now())){
-            mission_num = 5;
-            last_request = ros::Time::now();
-          }
+        calc_AB();
+        if (lib_time_record_func(1.5, ros::Time::now())){
+          mission_num = 5;
+          last_request = ros::Time::now();
+        }
         }
       break;
 
     case 5://飞到识别/投货点  
-      if(mission_pos_cruise(target5_x, target5_y, ALTITUDE, 0, 0.2))
+      if(mission_pos_cruise(target5_x, target5_y, 0.6, 0, 0.2))
       {
-        if (lib_time_record_func(1.5, ros::Time::now())){
-          trigger_drop(true);
-          mission_num = 6;
-          last_request = ros::Time::now();
+        if(!isDrop){
+          if (lib_time_record_func(1.5, ros::Time::now())){
+            trigger_drop(true);
+            isDrop = true;
+            last_request = ros::Time::now();
+          }
+        }
+        else if(isDrop){
+          if (lib_time_record_func(1.5, ros::Time::now())){
+            mission_num = 6;
+            last_request = ros::Time::now();
+            trigger_drop(false);//关闭舵机
+          }
         }
       }
       break;
     
     case 6://识别拟打击目标
-      trigger_drop(false);//关闭舵机
+    {
+      float target_x;
+      float target_y;
 
       if(yolo_result == "A_down" || laser_target == "A"){
-        ROS_INFO("<<<--------识别到A，飞往A点-------->>>");
-        camera_switch();
         laser_target = "A";
-        trigger_laser(true);
-        if(mission_pos_cruise(targetA_x, targetA_y, height, 0, 0.2))
-        { 
-          if (lib_time_record_func(4.0, ros::Time::now())){
-            mission_num = 7;
-            last_request = ros::Time::now();
-          }
-        }
+        target_x = targetA_x;
+        target_y = targetA_y;
       }else if(yolo_result == "B_down" || laser_target == "B"){
-        ROS_INFO("<<<--------识别到B，飞往A点-------->>>");
-        camera_switch();
         laser_target = "B";
-        trigger_laser(true);
-        if(mission_pos_cruise(targetB_x, targetB_y, height, 0, 0.2))
-        {
-          if (lib_time_record_func(4.0, ros::Time::now())){
+        target_x = targetB_x;
+        target_y = targetB_y;
+      }else{
+        break;
+      }
+
+      if(!isDown){
+        if(mission_pos_cruise(target_x, target_y, height, 0, 0.2)){
+          isDown = true;
+        }
+      }
+      else if(isDown){
+
+        //下降到打击位置
+        if(mission_pos_cruise(target_x, target_y, ALTITUDE, 0, 0.2)){
+          
+          //激光笔控制逻辑（加入单独的时间控制防止打不开）
+          if(first_laser){
+            laser_time = ros::Time::now();
+            first_laser = false;
+          }
+          std_msgs::Bool msg;
+          if(ros::Time::now() - laser_time < ros::Duration(2.0)){
+            msg.data = true;
+            laser_fire_pub.publish(msg);
+            ROS_INFO("[Laser Trigger] 已发送激光触发信号");
+          }
+          if(ros::Time::now() - laser_time >= ros::Duration(2.0)){
+            msg.data = false;
+            laser_fire_pub.publish(msg);
+            ROS_INFO("[Laser Trigger] 已发送激光关闭信号");
+          }
+
+          if (lib_time_record_func(3.0, ros::Time::now()))
+          {
             mission_num = 7;
             last_request = ros::Time::now();
           }
         }
-      }else {
-        ROS_INFO("<<<--------未识别到任何目标-------->>>");
+      }
+      break;
+    }
+
+      /*--------开始返程---------*/
+    case 7://回到投货位置
+
+      if(mission_pos_cruise(target5_x, target5_y, ALTITUDE, 0, 0.2)){
+        if (lib_time_record_func(1.5, ros::Time::now())){
+          mission_num = 70;
+          last_request = ros::Time::now();
+        }
       }
       break;
 
-      /*--------开始返程---------*/
-      case 7://回到投货位置
-        trigger_laser(false);
-        
-        if(mission_pos_cruise(target5_x, target5_y, ALTITUDE, 0, 0.2)){
+    case 70:
+      if(mission_pos_cruise(target4_x, target4_y, ALTITUDE, 0, 0.2)){
           if (lib_time_record_func(1.5, ros::Time::now())){
-            mission_num = 70;
+            mission_num = 8;
             last_request = ros::Time::now();
           }
         }
-        break;
-
-      case 70:
-        if(mission_pos_cruise(target4_x, target4_y, ALTITUDE, 0, 0.2)){
-            if (lib_time_record_func(1.5, ros::Time::now())){
-              mission_num = 8;
-              last_request = ros::Time::now();
-            }
-          }
-        break;
-      
-      case 8://回到中间点
-        if(mission_pos_cruise(target3_x, target3_y, ALTITUDE, 0, 0.2)){
-          if (lib_time_record_func(1.5, ros::Time::now())){
-            mission_num = 9;
-            last_request = ros::Time::now();
-          }
+      break;
+    
+    case 8://回到中间点
+      if(mission_pos_cruise(target3_x, target3_y, ALTITUDE, 0, 0.2)){
+        if (lib_time_record_func(1.5, ros::Time::now())){
+          mission_num = 9;
+          last_request = ros::Time::now();
         }
-        break;
+      }
+      break;
 
-      case 9://选择路线回到门前
-        if(!is_initialized){
-          switch (route)
-          {
-            case 103: current_traj_ptr = &traj_1_3_back; break;
-            case 104: current_traj_ptr = &traj_1_4_back; break;
-            case 203: current_traj_ptr = &traj_2_3_back; break;
-            case 204: current_traj_ptr = &traj_2_4_back; break;
-            default: current_traj_ptr = nullptr; break;
-          }
-          //清理之前的数据
-          if (current_traj_ptr && !current_traj_ptr->empty()) {
-            traj_follower_step(*current_traj_ptr, ALTITUDE, local_pos, 0.3, origin_x, origin_y, max_vel, min_vel, slow_down_radius, true); 
-            ROS_INFO("Return Trajectory Loaded: %zu points", current_traj_ptr->size());
-          } else {
-            ROS_ERROR("No return trajectory found for route %d!", route);
-          }
-          is_initialized = true;
+    case 9://选择路线回到门前
+      if(!is_initialized){
+        switch (route)
+        {
+          case 103: current_traj_ptr = &traj_1_3_back; break;
+          case 104: current_traj_ptr = &traj_1_4_back; break;
+          case 203: current_traj_ptr = &traj_2_3_back; break;
+          case 204: current_traj_ptr = &traj_2_4_back; break;
+          default: current_traj_ptr = nullptr; break;
         }
-
-        ROS_INFO("<<<--------Trajectory following-------->>>");
-        if (traj_follower_step(*current_traj_ptr, ALTITUDE, local_pos, 0.3, origin_x, origin_y, max_vel, min_vel, slow_down_radius, false)) {
-          ROS_INFO("Trajectory following finished.");
-          // 悬停一小会儿后进入下一个任务
-          if (lib_time_record_func(1.5, ros::Time::now())) {
-            mission_num = 10;
-            is_initialized = false;
-            last_request = ros::Time::now();
-          }
+        //清理之前的数据
+        if (current_traj_ptr && !current_traj_ptr->empty()) {
+          traj_follower_step(*current_traj_ptr, ALTITUDE, local_pos, 0.3, origin_x, origin_y, max_vel, min_vel, slow_down_radius, true); 
+          ROS_INFO("Return Trajectory Loaded: %zu points", current_traj_ptr->size());
+        } else {
+          ROS_ERROR("No return trajectory found for route %d!", route);
         }
+        is_initialized = true;
+      }
 
-        break;
-
-      case 10://返程穿门
-        if (mission_pos_cruise(target1_x, target1_y, ALTITUDE, 0, 0.2)){
-            if (lib_time_record_func(1.5, ros::Time::now())){
-              mission_num = 11;
-              last_request = ros::Time::now();
-            }
+      ROS_INFO("<<<--------Trajectory following-------->>>");
+      if (traj_follower_step(*current_traj_ptr, ALTITUDE, local_pos, 0.3, origin_x, origin_y, max_vel, min_vel, slow_down_radius, false)) {
+        ROS_INFO("Trajectory following finished.");
+        // 悬停一小会儿后进入下一个任务
+        if (lib_time_record_func(1.5, ros::Time::now())) {
+          mission_num = 10;
+          is_initialized = false;
+          last_request = ros::Time::now();
         }
-        break;
+      }
 
-      case 11://回到出发点
-        if(mission_pos_cruise(0, 0, ALTITUDE, 0, 0.2)){
+      break;
+
+    case 10://返程穿门
+      if (mission_pos_cruise(0, 0, ALTITUDE, 0, 0.2)){
           if (lib_time_record_func(1.5, ros::Time::now())){
             mission_num = 0;
             last_request = ros::Time::now();
           }
+      }
+      break;
+
+    // case 11://回到出发点
+    //   if(mission_pos_cruise(0, 0, ALTITUDE, 0, 0.2)){
+    //     if (lib_time_record_func(1.5, ros::Time::now())){
+    //       mission_num = 0;
+    //       last_request = ros::Time::now();
+    //     }
+    //   }
+    //   break;
+    
+    //直接降落
+    case 0:
+      // if (lib_time_record_func(2.0, ros::Time::now())){
+      //   ROS_INFO("AUTO.LAND");
+      //   offb_set_mode.request.custom_mode = "AUTO.LAND";
+      //   set_mode_client.call(offb_set_mode);
+      //   mission_num = -1;
+      // }
+      // else if(ros::Time::now() - last_request >= ros::Duration(5.0))
+      // {
+      //   ROS_INFO("AUTO.LAND");
+      //   offb_set_mode.request.custom_mode = "AUTO.LAND";
+      //   set_mode_client.call(offb_set_mode);
+      //   mission_num = -1;
+      // }
+      // break;
+      {
+        if (mission_pos_cruise(origin_x, origin_y, -0.01, 0, 0.2)) {
+          if (lib_time_record_func(1.0, ros::Time::now())) {
+            // 调用上锁服务
+            mavros_msgs::CommandBool disarm_srv;
+            disarm_srv.request.value = false;
+
+            if (arming_client.call(disarm_srv) && disarm_srv.response.success) {
+                ROS_INFO("Aircraft disarmed successfully.");
+            } else {
+                ROS_ERROR("Failed to disarm aircraft.");
+            }
+            mission_num = -1;
+          }
         }
-        break;
-      
-      //直接降落
-      case 0:
-        if (lib_time_record_func(2.0, ros::Time::now())){
-          ROS_INFO("AUTO.LAND");
-          offb_set_mode.request.custom_mode = "AUTO.LAND";
-          set_mode_client.call(offb_set_mode);
-          mission_num = -1;
-        }
-        else if(ros::Time::now() - last_request >= ros::Duration(5.0))
-        {
-          ROS_INFO("AUTO.LAND");
-          offb_set_mode.request.custom_mode = "AUTO.LAND";
-          set_mode_client.call(offb_set_mode);
-          mission_num = -1;
-        }
-        break;
+      }
+      break;
+    case -1:
+      ros::shutdown();
+      break;
     }
     mavros_setpoint_pos_pub.publish(setpoint_raw);
     print_publish();

@@ -1,74 +1,32 @@
-# radar_curve_planner
+# radar_curve_planner — all-points strict 2D projection
 
-Smooth EGO-lite ROS1/Noetic trajectory YAML generator with RViz visualization.
+This ROS1 Noetic catkin package generates and visualizes an obstacle-avoiding XY trajectory from `/cloud_registered` and `/mavros/local_position/pose`.
 
-## Important behavior
+Safety policy in this version:
 
-This version plans using **height-slice 2D projection** by default:
+- The output trajectory is XY-only.
+- Every finite point in `/cloud_registered` is projected to XY as an obstacle.
+- No height slice, no z-band filtering, no near-start point filtering.
+- No start/goal clearing.
+- No initial path segment collision skipping.
+- `min_collision_points=1`: one projected point inside the footprint invalidates the path.
+- If the point cloud blocks the route, planning fails instead of writing a risky YAML.
 
-1. Take only point-cloud points near a configurable height slice.
-2. Project those points to the XY plane.
-3. Inflate the 2D obstacles by the drone safety radius.
-4. Run A* + smoothing within the virtual wall boundary.
-
-This is intended for an XY-only follower: the path does not try to fly over obstacles, but it also avoids letting ground/low-height noise fill the entire 2D map.
-
-Default slice:
-
-```yaml
-project_pointcloud_to_2d: true
-use_height_slice_projection: true
-projection_slice_center_z: 0.80
-projection_slice_half_width: 0.15
-projection_min_z: 0.65
-projection_max_z: 0.95
-```
-
-So the planner uses points in `[0.65, 0.95]`, equivalent to `z = 0.8 ± 0.15 m`, then compresses them into 2D obstacles.
-
-If the obstacle point cloud is sparse at 0.8 m, widen the slice:
-
-```yaml
-projection_slice_half_width: 0.20
-```
-
-If too many points are still included, narrow it:
-
-```yaml
-projection_slice_half_width: 0.10
-```
-
-Keep the parameters under `radar_midpoint_node` and `curve_yaml_writer_node` consistent.
-
-## Run
+Main launch:
 
 ```bash
-cd /home/abot/kk_ws
-catkin_make --pkg radar_curve_planner
-source devel/setup.bash
 roslaunch radar_curve_planner radar_curve_planner.launch use_rviz:=true
 ```
 
-## Visualize existing YAML
-
-```bash
-roslaunch radar_curve_planner view_yaml_traj.launch use_rviz:=true
-```
-
-RViz Fixed Frame should be `camera_init` unless your point cloud uses another frame.
-
-## Output
+YAML output:
 
 ```text
 /home/abot/kk_ws/src/radar_curve_planner/tmp/radar_generated_traj.yaml
 ```
 
-## Main topics
+Expected log keyword:
 
-- `/cloud_registered`: input point cloud
-- `/mavros/local_position/pose`: current pose
-- `/radar_curve_planner/mid_points`: smoothed midpoint path
-- `/radar_curve_planner/fitted_path`: final YAML writer path
-- `/radar_curve_planner/curve_markers`: final trajectory markers
-- `/radar_curve_planner/yaml_path`: YAML visualizer path
-- `/radar_curve_planner/yaml_markers`: YAML visualizer markers
+```text
+projection=all_points_2d[-1000.00,1000.00]
+near_ignore=OFF start_clear=OFF
+```

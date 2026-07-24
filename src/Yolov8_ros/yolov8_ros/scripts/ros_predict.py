@@ -49,6 +49,8 @@ class YOLODetector:
         use_cpu = rospy.get_param('~use_cpu', False)
         self.enhanced = rospy.get_param('~enhanced', True)
         self.visualize = _as_bool(rospy.get_param('~visualize', False))
+        self.window_name = str(rospy.get_param('~window_name', 'YOLOv8_Forward_Camera_View'))
+        self.window_initialized = False
 
         self.device = 'cpu' if use_cpu else ('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = YOLO(weight_path)
@@ -67,7 +69,10 @@ class YOLODetector:
 
         # ===== 原有输出参数 =====
         pub_topic = rospy.get_param('~pub_topic', '/yolo/detections')
+        # 前方带框图像保持原话题名不变，避免影响已有 rqt/评委显示链路。
         image_pub_topic = rospy.get_param('~image_pub_topic', '/yolov8_detection/image_result')
+        # 新增：下方摄像头带框图像。只改本文件即可，不影响识别结果话题。
+        image_pub_topic_down = rospy.get_param('~image_pub_topic_down', '/yolov8_detection/image_result_down')
 
         # ===== 新增输出参数：不影响原有 pub_topic，额外给前/下识别结果各自一个话题 =====
         # 主程序原来订阅 /yolo/detections 的话，仍然只收到 active_camera 当前视角的识别结果。
@@ -78,7 +83,10 @@ class YOLODetector:
         self.position_pub = rospy.Publisher(pub_topic, YoloDetection, queue_size=1)
         self.position_pub_down = rospy.Publisher(pub_topic_down, YoloDetection, queue_size=1)
         self.position_pub_forward = rospy.Publisher(pub_topic_forward, YoloDetection, queue_size=1)
-        self.image_pub = rospy.Publisher(image_pub_topic, Image, queue_size=1)
+        # 前方带框图像：沿用原来的 image_pub_topic。
+        self.image_pub_forward = rospy.Publisher(image_pub_topic, Image, queue_size=1)
+        # 下方带框图像：新增独立话题，避免和前方画面互相覆盖。
+        self.image_pub_down = rospy.Publisher(image_pub_topic_down, Image, queue_size=1)
 
         # ===== 运行模式 =====
         self.single_camera = _as_bool(rospy.get_param('~single_camera', False))
@@ -94,7 +102,8 @@ class YOLODetector:
         if self.recognize_mode not in ('both', 'active'):
             self.recognize_mode = 'both'
 
-        # 只发布前置摄像头带框图片，满足评委只看前方框的要求
+        # 兼容旧 launch 参数：本版不再使用它限制下方图像发布。
+        # 现在会分别发布前方/下方两个带框图像话题。
         self.publish_front_image_only = _as_bool(rospy.get_param('~publish_front_image_only', True))
         self.publish_image = _as_bool(rospy.get_param('~publish_image', True))
         self.image_pub_fps = float(rospy.get_param('~image_pub_fps', 0.0))  # 0=不限速，保持兼容
@@ -129,6 +138,12 @@ class YOLODetector:
         rospy.loginfo('下方识别结果: %s', pub_topic_down)
         rospy.loginfo('前方识别结果: %s', pub_topic_forward)
         rospy.loginfo('前方带框图像: %s', image_pub_topic)
+        rospy.loginfo('下方带框图像: %s', image_pub_topic_down)
+        if self.visualize:
+            if os.environ.get('DISPLAY'):
+                rospy.loginfo('自动打开前方带框检测窗口: %s', self.window_name)
+            else:
+                rospy.logwarn('visualize=true，但当前没有 DISPLAY，无法自动打开 OpenCV 窗口')
         rospy.loginfo('开始实时检测，按Ctrl+C退出...')
 
     # ================== 回调入口 ==================
@@ -274,11 +289,10 @@ class YOLODetector:
                 state.stable_count = 1
                 state.switch_pending = None
 
-        # 只发布前方摄像头带框图像；下方不发布图片，避免评委显示链路被下方画面抢占。
-        if camera_role == 'forward':
-            self.publish_forward_detection_image(frame, valid_boxes, results[0], msg.header, state)
+        # 发布带框图像：前方和下方各发各的话题，不互相覆盖。
+        self.publish_detection_image(frame, valid_boxes, results[0], msg.header, state, camera_role)
 
-        # 可选 OpenCV 本地窗口，也只显示前方，不影响 rqt。
+        # 可选 OpenCV 本地窗口，仍然只显示前方，避免额外窗口影响原流程。
         if camera_role == 'forward' and self.visualize:
             self.show_forward_image(frame, valid_boxes, results[0])
 
@@ -294,11 +308,12 @@ class YOLODetector:
         if self.single_camera or camera_role == self.active_camera:
             self.position_pub.publish(det_msg)
 
-    # ================== 前方带框图片输出 ==================
-    def _should_publish_image(self, state):
+    # ================== 前方/下方带框图片输出 ==================
+    def _should_publish_image(self, state, publisher):
         if not self.publish_image:
             return False
-        if self.image_pub.get_num_connections() <= 0:
+        # 没有 rqt_image_view / 其他节点订阅时不做 frame.copy + cv2_to_imgmsg，降低负载。
+        if publisher.get_num_connections() <= 0:
             return False
         if self.image_pub_fps > 0:
             now = rospy.Time.now()
@@ -307,20 +322,29 @@ class YOLODetector:
             state.last_image_pub_time = now
         return True
 
-    def publish_forward_detection_image(self, frame, valid_boxes, result0, header, state):
-        if self.publish_front_image_only and not self._should_publish_image(state):
+    def publish_detection_image(self, frame, valid_boxes, result0, header, state, camera_role):
+        if camera_role == 'forward':
+            publisher = self.image_pub_forward
+            camera_label = 'FORWARD'
+            warn_label = '前方'
+        elif camera_role == 'down':
+            publisher = self.image_pub_down
+            camera_label = 'DOWN'
+            warn_label = '下方'
+        else:
             return
-        if not self.publish_front_image_only and not self._should_publish_image(state):
+
+        if not self._should_publish_image(state, publisher):
             return
 
         annotated_frame = frame.copy()
-        self.draw_boxes(annotated_frame, valid_boxes, result0, 'FORWARD')
+        self.draw_boxes(annotated_frame, valid_boxes, result0, camera_label)
         try:
             detection_msg = self.bridge.cv2_to_imgmsg(annotated_frame, 'bgr8')
             detection_msg.header = header
-            self.image_pub.publish(detection_msg)
+            publisher.publish(detection_msg)
         except Exception as e:
-            rospy.logwarn_throttle(2.0, '发布前方检测图像失败: %s', e)
+            rospy.logwarn_throttle(2.0, '发布%s检测图像失败: %s', warn_label, e)
 
     def show_forward_image(self, frame, valid_boxes, result0):
         if not os.environ.get('DISPLAY'):
@@ -328,8 +352,12 @@ class YOLODetector:
         annotated_frame = frame.copy()
         self.draw_boxes(annotated_frame, valid_boxes, result0, 'FORWARD')
         try:
+            if not self.window_initialized:
+                cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(self.window_name, 640, 480)
+                self.window_initialized = True
             resized_frame = cv2.resize(annotated_frame, (640, 480))
-            cv2.imshow('YOLOv8_Forward_Camera_View', resized_frame)
+            cv2.imshow(self.window_name, resized_frame)
             cv2.waitKey(1)
         except Exception as e:
             rospy.logwarn_throttle(2.0, 'OpenCV imshow error: %s', e)
